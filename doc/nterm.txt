@@ -74,6 +74,7 @@ Nterm works without calling setup(). To change the defaults: >lua
       opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
       transparent = false, -- no background: your terminal emulator's transparency shows
       lazygit_key = '<leader>gg', -- false to disable
+      border_color = '#2391FF',   -- or { '#from', '#to' }
     })
 <
 With lazy.nvim: >lua
@@ -95,6 +96,12 @@ group of your colorscheme, and follows it when you change colorscheme:
 
 Groups without a foreground color fall back to the built-in palette, which
 you can also force with theme = 'nterm'.
+
+Border ~
+The borders of Nterm's floating windows are a gradient running diagonally
+from the top-left corner (darkest) to the bottom-right one (lightest).
+`border_color` is either one color, whose dark and light shades are used,
+or a pair { from, to } with the exact ends. Default: '#2391FF'.
 
 Opacity and transparency ~
 `opacity` makes the floating windows see-through (Neovim blends them with

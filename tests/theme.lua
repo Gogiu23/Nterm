@@ -26,4 +26,18 @@ local win = vim.api.nvim_get_current_win()
 assert(vim.wo[win].winblend == 30, 'opacity 0.7 -> winblend 30, got ' .. vim.wo[win].winblend)
 assert(vim.wo[win].winhighlight:find('Normal:NtermNormal'), 'transparent winhighlight')
 n.hide()
+-- border gradient: default #2391FF, a custom color, a { from, to } pair, and bad input
+local function edge(i) return fg('NtermEdge' .. i) end
+n.setup({ transparent = false })
+assert(edge(1) ~= edge(5), 'border should be a gradient')
+n.toggle()
+local b = vim.api.nvim_win_get_config(0).border
+assert(type(b) == 'table' and b[1][2] == 'NtermEdge1' and b[5][2] == 'NtermEdge5', 'floats use the gradient border')
+n.hide()
+n.setup({ border_color = { '#000000', '#ffffff' } })
+assert(edge(1) == '#000000' and edge(5) == '#ffffff' and edge(3) == '#808080', 'from/to: ' .. edge(3))
+n.setup({ border_color = '#ff0000' })
+assert(edge(1) == '#8c0000', 'custom color dark end: ' .. edge(1))
+n.setup({ border_color = 'blue' }) -- warns, keeps the previous valid color
+assert(edge(1) == '#8c0000', 'invalid border_color is ignored')
 print('ok')

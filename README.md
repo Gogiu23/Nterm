@@ -72,6 +72,7 @@ require('nterm').setup({
   opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
   transparent = false, -- no background: your terminal emulator's transparency shows
   lazygit_key = '<leader>gg', -- false to disable
+  border_color = '#2391FF',   -- or { '#from', '#to' }
 })
 ```
 
@@ -84,6 +85,8 @@ With lazy.nvim:
 With `bottom`, `left` or `right` the terminal is a split docked to that side of the editor. The header and the guide are replaced by a single tab with the title, the current terminal and the mode, and the sidebar opens as a floating window.
 
 **Colors.** With `theme = 'auto'` (the default) the gradients are built from your colorscheme's highlight groups (`Function` for the title and NORMAL, `String` for INSERT, `Type` for VISUAL, `Keyword` for TERMINAL, `Number` for COMMAND, `DiagnosticError` for REPLACE) and follow it when you switch colorscheme. `theme = 'nterm'` uses the built-in blue palette.
+
+**Border.** The borders of the floating windows are a gradient from the top-left corner (darkest) to the bottom-right one (lightest). `border_color` takes one color, whose dark and light shades are used, or a `{ from, to }` pair with the exact ends. Default: `#2391FF`.
 
 **Opacity and transparency.** `opacity` makes the floating windows see-through (Neovim's `winblend`; it doesn't apply to docked splits). `transparent = true` removes Nterm's background instead, so your terminal emulator's own transparency (e.g. Alacritty's `window.opacity`) shows through.
 

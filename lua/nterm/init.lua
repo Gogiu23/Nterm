@@ -13,6 +13,7 @@ local C = {
   opacity = 1,        -- floating windows, 0..1 (winblend)
   transparent = false, -- no background, so the terminal emulator's own transparency shows
   lazygit_key = '<leader>gg', -- false to disable
+  border_color = '#2391FF', -- border gradient: a color (dark -> light shades of it) or { from, to }
 }
 local S = { terms = {}, cmds = {}, apps = {}, cur = nil, win = nil, side = nil, head = nil, sidebuf = nil, keys = nil }
 local ns = api.nvim_create_namespace('nterm')
@@ -98,7 +99,27 @@ local function load_palette()
   end
 end
 
+-- Corners and sides in order ╭ ─ ╮ │ ╯ ─ ╰ │; shades 1..5 run diagonally from top-left to bottom-right.
+local BORDER = {}
+for i, ch in ipairs({ '╭', '─', '╮', '│', '╯', '─', '╰', '│' }) do
+  BORDER[i] = { ch, 'NtermEdge' .. ({ 1, 2, 3, 4, 5, 4, 3, 2 })[i] }
+end
+
+local function is_hex(c) return type(c) == 'string' and c:match('^#%x%x%x%x%x%x$') ~= nil end
+
+local function set_border_hl()
+  local bc, from, to = C.border_color
+  if type(bc) == 'table' then
+    from, to = bc[1], bc[2]
+  else
+    from, to = lerp(bc, '#000000', 0.45), lerp(bc, '#ffffff', 0.35)
+  end
+  local bg = (not C.transparent) and (hl_color('FloatBorder', 'bg') or hl_color('NormalFloat', 'bg')) or nil
+  for i = 1, 5 do api.nvim_set_hl(0, 'NtermEdge' .. i, { fg = lerp(from, to, (i - 1) / 4), bg = bg }) end
+end
+
 local function set_hl()
+  set_border_hl()
   load_palette()
   api.nvim_set_hl(0, 'NtermIcon', { fg = BLUE[1], bold = true })
   api.nvim_set_hl(0, 'NtermTab', { bg = TAB_BG })
@@ -166,11 +187,11 @@ end
 
 local function head_cfg()
   local w, _, row, col = geom()
-  return { relative = 'editor', width = w, height = HEAD - 2, row = row, col = col, border = 'rounded' }
+  return { relative = 'editor', width = w, height = HEAD - 2, row = row, col = col, border = BORDER }
 end
 
 local function side_cfg()
-  local cfg = { relative = 'editor', width = SIDE, border = 'rounded', title = ' Terminals ', title_pos = 'center' }
+  local cfg = { relative = 'editor', width = SIDE, border = BORDER, title = ' Terminals ', title_pos = 'center' }
   if floating() then
     local _, h, row, col = geom()
     cfg.height, cfg.row, cfg.col = h - HEAD, row + HEAD, col
@@ -186,7 +207,7 @@ local function main_cfg()
   local w, h, row, col = geom()
   local off = valid(S.side) and SIDE + 2 or 0
   return { relative = 'editor', width = w - off, height = h - HEAD, row = row + HEAD, col = col + off,
-    border = 'rounded' }
+    border = BORDER }
 end
 
 local function draw_head()
@@ -311,7 +332,7 @@ function M.keys()
   vim.bo[buf].bufhidden = 'wipe'
   S.keys = api.nvim_open_win(buf, true, { relative = 'editor', width = width, height = #lines,
     row = math.floor((vim.o.lines - #lines) / 2), col = math.floor((vim.o.columns - width) / 2),
-    border = 'rounded', title = ' Nterm keymaps ', title_pos = 'center', style = 'minimal', zindex = 60 })
+    border = BORDER, title = ' Nterm keymaps ', title_pos = 'center', style = 'minimal', zindex = 60 })
   style_win(S.keys)
   local function back()
     close(S.keys)
@@ -492,6 +513,12 @@ function M.setup(opts)
   if opts.position and not POSITIONS[opts.position] then
     vim.notify(("Nterm: unknown position '%s', using 'float'"):format(opts.position), vim.log.levels.WARN)
     opts.position = 'float'
+  end
+  local bc = opts.border_color
+  if bc ~= nil and not (is_hex(bc) or (type(bc) == 'table' and is_hex(bc[1]) and is_hex(bc[2]))) then
+    vim.notify("Nterm: border_color must be '#rrggbb' or { '#rrggbb', '#rrggbb' }, using the default",
+      vim.log.levels.WARN)
+    opts.border_color = nil
   end
   C = vim.tbl_extend('force', C, opts)
   set_hl()
