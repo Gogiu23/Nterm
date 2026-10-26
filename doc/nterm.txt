@@ -1,54 +1,87 @@
-*nterm.txt*  Terminal flotante con barra lateral de terminales
+*nterm.txt*  Floating terminal with a sidebar of terminals
 
 ==============================================================================
-CONTENIDO                                                       *nterm*
+CONTENTS                                                        *nterm*
 
-  1. Introducción ............................ |nterm-intro|
-  2. Atajos .................................. |nterm-atajos|
-  3. Comandos ................................ |nterm-comandos|
-  4. Notas ................................... |nterm-notas|
-
-==============================================================================
-1. INTRODUCCIÓN                                                 *nterm-intro*
-
-Nterm abre un terminal en una ventana flotante. Puedes tener varios
-terminales a la vez y moverte entre ellos con una barra lateral que muestra
-el último comando ejecutado en cada uno.
+  1. Introduction ............................ |nterm-intro|
+  2. Keymaps ................................. |nterm-keymaps|
+  3. Commands ................................ |nterm-commands|
+  4. Configuration ........................... |nterm-config|
+  5. Notes ................................... |nterm-notes|
 
 ==============================================================================
-2. ATAJOS                                                       *nterm-atajos*
+1. INTRODUCTION                                                 *nterm-intro*
 
-En cualquier sitio ~
-  <C-/>           Abre u oculta el terminal flotante. Si no existe ningún
-                  terminal, crea uno.
+Nterm opens a terminal in a floating window. You can keep several terminals
+open and switch between them from a sidebar that shows the last command run
+in each one.
 
-Dentro del terminal ~
-  <Esc><Esc>      Pasa de modo terminal a modo normal.
-  <Space>         (modo normal) Abre la barra lateral.
-
-En la barra lateral ~
-  1-9             Cambia a ese terminal y cierra la barra.
-  <CR>            Cambia al terminal de la línea del cursor.
-  <C-+>           Abre un terminal nuevo y cierra la barra.
-                  Alternativas: <C-=> y +.
-  <C-d>           Cierra el terminal de la línea del cursor (pide
-                  confirmación).
-  <Space> q <Esc> Cierra la barra y vuelve al terminal.
+The header shows the current terminal (e.g. 2/3) on the left, the title in
+the middle, the current mode (NORMAL, INSERT, VISUAL, TERMINAL, ...) on the
+right, and a short guide of essential keymaps below.
 
 ==============================================================================
-3. COMANDOS                                                     *nterm-comandos*
+2. KEYMAPS                                                      *nterm-keymaps*
+
+Anywhere ~
+  <C-/>           Show or hide the floating terminal. Creates one if none
+                  exists.
+
+Inside the terminal ~
+  <C-+>           Open a new terminal. Alternative: <C-=>.
+  <C->>           Switch to the next terminal (wraps around).
+                  Alternative: <C-.>.
+  <C-<>           Switch to the previous terminal (wraps around).
+                  Alternative: <C-,>.
+  <C-b>           Open the sidebar.
+  <C-q>           Show a popup with every keymap.
+  <Esc><Esc>      Switch from terminal mode to normal mode.
+
+In the sidebar ~
+  1-9             Switch to that terminal and close the sidebar.
+  <CR>            Switch to the terminal under the cursor.
+  <C-+>           Open a new terminal and close the sidebar.
+                  Alternatives: <C-=> and +.
+  <C-d>           Close the terminal under the cursor (asks first).
+  <C-b> q <Esc>   Close the sidebar and go back to the terminal.
+  <C-q>           Show a popup with every keymap.
+
+==============================================================================
+3. COMMANDS                                                     *nterm-commands*
 
                                                                 *:NtermHelp*
-:NtermHelp        Abre esta guía.
+:NtermHelp        Open this guide.
 
 ==============================================================================
-4. NOTAS                                                        *nterm-notas*
+4. CONFIGURATION                                                *nterm-config*
 
-- <C-+> solo llega a Neovim en terminales con el protocolo de teclado de
-  kitty (Kitty, WezTerm, Ghostty). En el resto usa <C-=> o +.
-- Muchas terminales envían <C-/> como <C-_>; Nterm mapea los dos.
-- El "último comando" se obtiene de la línea del prompt al pulsar <CR>,
-  quitando el prompt hasta el primer $ > # % o ❯. Con prompts poco
-  habituales puede mostrarse la línea entera.
+Nterm works without calling setup(). To change the defaults: >lua
+
+    require('nterm').setup({
+      position = 'float', -- 'float', 'bottom', 'left' or 'right'
+      size = 0.3,         -- docked positions: fraction of the editor
+    })
+<
+With lazy.nvim: >lua
+
+    { 'Gogiu23/Nterm', opts = { position = 'bottom' } }
+<
+With 'bottom', 'left' or 'right' the terminal is a split docked to that side
+of the editor. The header and the guide are replaced by a single tab on top
+of the split with the title, the current terminal and the mode, and the
+sidebar opens as a floating window.
+
+==============================================================================
+5. NOTES                                                        *nterm-notes*
+
+- <C-+> only reaches Neovim in terminals that support the kitty keyboard
+  protocol (Kitty, WezTerm, Ghostty, Alacritty). Elsewhere use <C-=> or +.
+- The header icon needs a Nerd Font.
+- Many terminals send <C-/> as <C-_>; Nterm maps both.
+- Inside Nterm, <C-b>, <C-q>, <C-.> and <C-,> are taken by Nterm and don't
+  reach the shell.
+- The "last command" is read from the prompt line when you press <CR>,
+  stripping the prompt up to the first $ > # % or ❯. With unusual prompts
+  the whole line may be shown.
 
  vim:tw=78:ts=8:ft=help:norl:

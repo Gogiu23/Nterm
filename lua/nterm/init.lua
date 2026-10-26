@@ -2,32 +2,159 @@ local M = {}
 local api = vim.api
 
 local SIDE = 30
-local S = { terms = {}, cmds = {}, cur = nil, win = nil, side = nil, sidebuf = nil }
+local HEAD = 4 -- header rows: border + title + guide + border
+local ICON = '\u{f36f}' -- nf-linux-neovim, needs a Nerd Font
+local TICON = '\u{e795}' -- nf-dev-terminal
+local POSITIONS = { float = true, bottom = true, left = true, right = true }
+local C = { position = 'float', size = 0.3 } -- size: fraction of the editor for docked positions
+local S = { terms = {}, cmds = {}, cur = nil, win = nil, side = nil, head = nil, sidebuf = nil, keys = nil }
+local ns = api.nvim_create_namespace('nterm')
+
+local KEYS = {
+  { 'Global', 'Ctrl-/', 'Show / hide Nterm' },
+  { 'Terminal', 'Ctrl-b', 'Open the sidebar' },
+  { 'Terminal', 'Ctrl-+', 'New terminal (also Ctrl-=)' },
+  { 'Terminal', 'Ctrl-> / Ctrl-<', 'Next / previous terminal (also Ctrl-. / Ctrl-,)' },
+  { 'Terminal', 'Esc Esc', 'Switch to normal mode' },
+  { 'Terminal', 'Ctrl-q', 'Show this keymap list' },
+  { 'Sidebar', '1-9 / Enter', 'Switch to that terminal' },
+  { 'Sidebar', 'Ctrl-+', 'New terminal (also Ctrl-= and +)' },
+  { 'Sidebar', 'Ctrl-d', 'Close terminal (asks first)' },
+  { 'Sidebar', 'Ctrl-b / q / Esc', 'Close the sidebar' },
+  { 'Sidebar', 'Ctrl-q', 'Show this keymap list' },
+  { 'Command', ':NtermHelp', 'Open the full guide' },
+}
 
 local function valid(w) return w and api.nvim_win_is_valid(w) end
+local function floating() return C.position == 'float' end
+
+local function idx(buf)
+  for i, b in ipairs(S.terms) do if b == buf then return i end end
+end
+
+local BLUE = { '#2547a8', '#a8cdff' } -- title gradient, dark to light
+local TAB_BG = '#1b2440' -- background of the title tab in docked positions
+local GUIDE = 'Ctrl-/ hide · Ctrl-+ new · Ctrl-< Ctrl-> switch · Ctrl-b sidebar · Ctrl-q keymaps · Esc Esc normal mode'
+local MODES = { -- first char of nvim_get_mode().mode -> label, gradient
+  n = { 'NORMAL', '#2f63d6', '#8fb8ff' },
+  i = { 'INSERT', '#1f8a4c', '#8be0a4' },
+  v = { 'VISUAL', '#7a35c4', '#d4a8ff' },
+  V = { 'V-LINE', '#7a35c4', '#d4a8ff' },
+  ['\22'] = { 'V-BLOCK', '#7a35c4', '#d4a8ff' },
+  s = { 'SELECT', '#7a35c4', '#d4a8ff' },
+  R = { 'REPLACE', '#b3263d', '#ff9db0' },
+  c = { 'COMMAND', '#c26a12', '#ffd08a' },
+  t = { 'TERMINAL', '#b0127a', '#ff8ad8' },
+}
+
+local function mode() return MODES[api.nvim_get_mode().mode:sub(1, 1)] or MODES.n end
+local function term_label() return string.format('%s %d/%d', TICON, idx(S.cur) or 0, #S.terms) end
 
 local function set_hl()
-  local blues = { '#2547a8', '#2f63d6', '#4a86ef', '#73a7f7', '#a8cdff' }
-  for i, c in ipairs(blues) do api.nvim_set_hl(0, 'NtermTitle' .. i, { fg = c, bold = true }) end
+  api.nvim_set_hl(0, 'NtermIcon', { fg = '#3b82f6', bold = true })
+  api.nvim_set_hl(0, 'NtermTab', { bg = TAB_BG })
+  api.nvim_set_hl(0, 'NtermTabIcon', { fg = '#3b82f6', bg = TAB_BG, bold = true })
 end
 
-local function title()
-  local t = { { ' ' } }
-  for i, ch in ipairs({ 'N', 't', 'e', 'r', 'm' }) do t[#t + 1] = { ch, 'NtermTitle' .. i } end
-  t[#t + 1] = { ' ' }
-  return t
+local function lerp(a, b, t)
+  local function ch(h, i) return tonumber(h:sub(i, i + 1), 16) end
+  return string.format('#%02x%02x%02x', ch(a, 2) + (ch(b, 2) - ch(a, 2)) * t + 0.5,
+    ch(a, 4) + (ch(b, 4) - ch(a, 4)) * t + 0.5, ch(a, 6) + (ch(b, 6) - ch(a, 6)) * t + 0.5)
 end
 
+-- Calls fn(char, group) for each character of `text`, colored along the gradient a -> b.
+local function gradient(text, a, b, style, fn)
+  local chars = vim.fn.split(text, [[\zs]])
+  for i, c in ipairs(chars) do
+    local fg = lerp(a, b, #chars > 1 and (i - 1) / (#chars - 1) or 0)
+    local group = 'Nterm_' .. fg:sub(2) .. (style.italic and 'i' or '') .. (style.bold and 'b' or '')
+      .. (style.bg and 'g' or '')
+    api.nvim_set_hl(0, group, { fg = fg, bg = style.bg, bold = style.bold, italic = style.italic })
+    fn(c, group)
+  end
+end
+
+local function paint(buf, row, col, text, a, b, style)
+  gradient(text, a, b, style, function(c, group)
+    api.nvim_buf_set_extmark(buf, ns, row, col, { end_col = col + #c, hl_group = group })
+    col = col + #c
+  end)
+end
+
+-- Same gradient, as a statusline/winbar string.
+local function bar(text, a, b, style)
+  local out = {}
+  gradient(text, a, b, style, function(c, group) out[#out + 1] = '%#' .. group .. '#' .. c end)
+  return table.concat(out)
+end
+
+-- Truncates to `n` display cells, ending in "..." when it doesn't fit.
+local function fit(s, n)
+  if vim.fn.strdisplaywidth(s) <= n then return s end
+  return vim.fn.strcharpart(s, 0, math.max(n - 3, 0)) .. '...'
+end
+M._fit = fit
+
+-- Docked positions: one tab with the title, the terminal number and the mode.
+function M.winbar()
+  local m = mode()
+  return '%#NtermTabIcon# ' .. ICON .. ' ' .. bar('Nterm ', BLUE[1], BLUE[2], { bold = true, bg = TAB_BG })
+    .. '%#Normal#  ' .. bar(term_label(), BLUE[1], BLUE[2], { bold = true })
+    .. '%=' .. bar(m[1], m[2], m[3], { bold = true }) .. ' '
+end
+
+-- outer box (header + body); body is what sits under the header
 local function geom()
   local w, h = math.floor(vim.o.columns * 0.8), math.floor(vim.o.lines * 0.8)
   return w, h, math.floor((vim.o.lines - h) / 2) - 1, math.floor((vim.o.columns - w) / 2)
 end
 
+local function head_cfg()
+  local w, _, row, col = geom()
+  return { relative = 'editor', width = w, height = HEAD - 2, row = row, col = col, border = 'rounded' }
+end
+
+local function side_cfg()
+  local cfg = { relative = 'editor', width = SIDE, border = 'rounded', title = ' Terminals ', title_pos = 'center' }
+  if floating() then
+    local _, h, row, col = geom()
+    cfg.height, cfg.row, cfg.col = h - HEAD, row + HEAD, col
+  else -- docked terminal: the sidebar floats in the middle of the editor
+    cfg.height = math.min(math.max(#S.terms, 3), vim.o.lines - 4)
+    cfg.row = math.floor((vim.o.lines - cfg.height) / 2) - 1
+    cfg.col = math.floor((vim.o.columns - SIDE) / 2)
+  end
+  return cfg
+end
+
 local function main_cfg()
   local w, h, row, col = geom()
   local off = valid(S.side) and SIDE + 2 or 0
-  return { relative = 'editor', width = w - off, height = h, row = row, col = col + off,
-    border = 'rounded', title = title(), title_pos = 'center' }
+  return { relative = 'editor', width = w - off, height = h - HEAD, row = row + HEAD, col = col + off,
+    border = 'rounded' }
+end
+
+local function draw_head()
+  if not valid(S.head) then return end
+  local buf = api.nvim_win_get_buf(S.head)
+  local width = api.nvim_win_get_width(S.head)
+  local w = vim.fn.strdisplaywidth
+  local m = mode()
+  local term = term_label()
+  local title = ICON .. '  Nterm'
+  local tcol = math.max(math.floor((width - w(title)) / 2), w(term) + 2)
+  local left = ' ' .. term .. string.rep(' ', tcol - w(term) - 1) .. title
+  local top = left .. string.rep(' ', math.max(width - w(left) - #m[1] - 1, 1)) .. m[1]
+  local guide = fit(GUIDE, width - 2)
+  local gpad = string.rep(' ', math.max(math.floor((width - w(guide)) / 2), 0))
+  api.nvim_buf_set_lines(buf, 0, -1, false, { top, gpad .. guide })
+  api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  local icon = #left - #title
+  api.nvim_buf_set_extmark(buf, ns, 0, icon, { end_col = icon + #ICON, hl_group = 'NtermIcon' })
+  paint(buf, 0, #left - 5, 'Nterm', BLUE[1], BLUE[2], { bold = true })
+  paint(buf, 0, 1, term, BLUE[1], BLUE[2], { bold = true })
+  paint(buf, 0, #top - #m[1], m[1], m[2], m[3], { bold = true })
+  paint(buf, 1, #gpad, guide, BLUE[1], BLUE[2], { italic = true })
 end
 
 local function last_cmd(b)
@@ -37,21 +164,24 @@ end
 
 local function render()
   if not (S.sidebuf and api.nvim_buf_is_valid(S.sidebuf)) then return end
-  local lines = {}
+  local lines, prefixes = {}, {}
   for i, b in ipairs(S.terms) do
-    lines[i] = string.format('%s%d  %s', b == S.cur and '▶' or ' ', i, last_cmd(b))
+    prefixes[i] = string.format('%s%d  ', b == S.cur and '▶' or ' ', i)
+    lines[i] = prefixes[i] .. fit(last_cmd(b), SIDE - vim.fn.strdisplaywidth(prefixes[i]) - 1)
   end
   vim.bo[S.sidebuf].modifiable = true
   api.nvim_buf_set_lines(S.sidebuf, 0, -1, false, lines)
   vim.bo[S.sidebuf].modifiable = false
+  api.nvim_buf_clear_namespace(S.sidebuf, ns, 0, -1)
+  for i, l in ipairs(lines) do
+    paint(S.sidebuf, i - 1, #prefixes[i], l:sub(#prefixes[i] + 1), BLUE[1], BLUE[2], {})
+  end
 end
 
 local function relayout()
-  if valid(S.win) then api.nvim_win_set_config(S.win, main_cfg()) end
-  if valid(S.side) then
-    local _, h, row, col = geom()
-    api.nvim_win_set_config(S.side, { relative = 'editor', width = SIDE, height = h, row = row, col = col })
-  end
+  if valid(S.head) then api.nvim_win_set_config(S.head, head_cfg()); draw_head() end
+  if valid(S.win) and floating() then api.nvim_win_set_config(S.win, main_cfg()) end
+  if valid(S.side) then api.nvim_win_set_config(S.side, side_cfg()) end
 end
 
 local function focus_term()
@@ -60,10 +190,25 @@ local function focus_term()
   vim.cmd.startinsert()
 end
 
+local function close(w)
+  -- pcall: a docked terminal can be the last window, which Neovim refuses to close
+  if valid(w) then pcall(api.nvim_win_close, w, true) end
+end
+
 local function close_side()
-  if valid(S.side) then api.nvim_win_close(S.side, true) end
+  close(S.side)
   S.side = nil
   relayout()
+end
+
+-- Shows `buf` in the terminal window; docked windows need their options set on every buffer switch.
+local function show(buf)
+  api.nvim_win_set_buf(S.win, buf)
+  if floating() then return end
+  local wo = vim.wo[S.win]
+  wo.winbar = "%{%v:lua.require'nterm'.winbar()%}"
+  wo.number, wo.relativenumber, wo.signcolumn = false, false, 'no'
+  wo.winfixheight, wo.winfixwidth = true, true
 end
 
 -- Strips the prompt from the cursor line: "user@host ~/dir> git status" -> "git status".
@@ -78,11 +223,7 @@ local function record(buf)
   local col = api.nvim_win_get_cursor(0)[2]
   -- cut at cursor so shell autosuggestions (fish) are ignored
   local cmd = M._parse(api.nvim_get_current_line():sub(1, col))
-  if cmd ~= '' then S.cmds[buf] = cmd; render() end
-end
-
-local function idx(buf)
-  for i, b in ipairs(S.terms) do if b == buf then return i end end
+  if cmd ~= '' then S.cmds[buf] = cmd; vim.schedule(render) end
 end
 
 local function remove(buf)
@@ -95,28 +236,73 @@ local function remove(buf)
     M.hide()
   elseif S.cur == buf then
     S.cur = S.terms[math.min(i, #S.terms)]
-    if valid(S.win) then api.nvim_win_set_buf(S.win, S.cur) end
+    if valid(S.win) then show(S.cur) end
   end
   if api.nvim_buf_is_valid(buf) then api.nvim_buf_delete(buf, { force = true }) end
   render()
+  relayout()
+end
+
+function M.keys()
+  if valid(S.keys) then return close(S.keys) end
+  local from = api.nvim_get_current_win()
+  local lines = {}
+  for _, k in ipairs(KEYS) do lines[#lines + 1] = string.format(' %-9s %-18s %s', k[1], k[2], k[3]) end
+  local width = 0
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 1) end
+  local buf = api.nvim_create_buf(false, true)
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].bufhidden = 'wipe'
+  S.keys = api.nvim_open_win(buf, true, { relative = 'editor', width = width, height = #lines,
+    row = math.floor((vim.o.lines - #lines) / 2), col = math.floor((vim.o.columns - width) / 2),
+    border = 'rounded', title = ' Nterm keymaps ', title_pos = 'center', style = 'minimal', zindex = 60 })
+  local function back()
+    close(S.keys)
+    S.keys = nil
+    if valid(from) then
+      api.nvim_set_current_win(from)
+      if vim.bo[api.nvim_win_get_buf(from)].buftype == 'terminal' then vim.cmd.startinsert() end
+    end
+  end
+  for _, k in ipairs({ 'q', '<Esc>', '<C-q>' }) do vim.keymap.set('n', k, back, { buffer = buf, nowait = true }) end
 end
 
 local function term_maps(buf)
   local o = { buffer = buf, nowait = true }
   for _, k in ipairs({ '<C-/>', '<C-_>' }) do vim.keymap.set({ 'n', 't' }, k, M.hide, o) end
-  vim.keymap.set('n', '<Space>', M.sidebar, o)
+  vim.keymap.set({ 'n', 't' }, '<C-b>', M.sidebar, o)
+  vim.keymap.set({ 'n', 't' }, '<C-q>', M.keys, o)
+  for _, k in ipairs({ '<C-+>', '<C-=>' }) do vim.keymap.set({ 'n', 't' }, k, M.new, o) end
+  -- Ctrl-> / Ctrl-< arrive in different shapes depending on layout and keyboard protocol
+  for _, k in ipairs({ '<C->>', '<C-S->>', '<C-S-lt>', '<C-.>' }) do
+    vim.keymap.set({ 'n', 't' }, k, function() M.cycle(1) end, o)
+  end
+  for _, k in ipairs({ '<C-lt>', '<C-,>' }) do vim.keymap.set({ 'n', 't' }, k, function() M.cycle(-1) end, o) end
   vim.keymap.set('t', '<Esc><Esc>', [[<C-\><C-n>]], { buffer = buf })
-  vim.keymap.set('t', '<CR>', function() record(buf); return '<CR>' end, { buffer = buf, expr = true })
   api.nvim_create_autocmd('TermClose', { buffer = buf, once = true,
     callback = function() vim.schedule(function() remove(buf) end) end })
 end
 
 local function open_win(buf)
-  local cfg = main_cfg()
-  cfg.style = 'minimal'
-  S.win = api.nvim_open_win(buf, true, cfg)
+  if floating() then
+    local cfg = head_cfg()
+    cfg.style, cfg.focusable = 'minimal', false
+    S.head = api.nvim_open_win(api.nvim_create_buf(false, true), false, cfg)
+    vim.bo[api.nvim_win_get_buf(S.head)].bufhidden = 'wipe'
+    draw_head()
+    cfg = main_cfg()
+    cfg.style = 'minimal'
+    S.win = api.nvim_open_win(buf, true, cfg)
+  else
+    local vert = C.position ~= 'bottom'
+    local size = math.floor((vert and vim.o.columns or vim.o.lines) * C.size)
+    S.win = api.nvim_open_win(buf, true, { split = vert and C.position or 'below', win = -1,
+      width = vert and size or nil, height = (not vert) and size or nil })
+    show(buf)
+  end
   api.nvim_create_autocmd('WinClosed', { pattern = tostring(S.win), once = true,
-    callback = function() vim.schedule(close_side) end })
+    callback = function() vim.schedule(function() close(S.head); close_side() end) end })
 end
 
 function M.new()
@@ -124,7 +310,7 @@ function M.new()
   table.insert(S.terms, buf)
   S.cur = buf
   if valid(S.win) then
-    api.nvim_win_set_buf(S.win, buf)
+    show(buf)
     api.nvim_set_current_win(S.win)
   else
     open_win(buf)
@@ -139,15 +325,20 @@ function M.select(i)
   local b = S.terms[i]
   if not b then return end
   S.cur = b
-  api.nvim_win_set_buf(S.win, b)
+  show(b)
   close_side()
   focus_term()
+end
+
+function M.cycle(d)
+  if #S.terms < 2 or not valid(S.win) then return end
+  M.select((idx(S.cur) - 1 + d) % #S.terms + 1)
 end
 
 function M.close_at(i)
   local b = S.terms[i]
   if not b then return end
-  if vim.fn.confirm(('¿Cerrar terminal %d (%s)?'):format(i, last_cmd(b)), '&Sí\n&No', 2) == 1 then
+  if vim.fn.confirm(('Close terminal %d (%s)?'):format(i, last_cmd(b)), '&Yes\n&No', 2) == 1 then
     remove(b)
   end
 end
@@ -163,7 +354,8 @@ local function side_buf()
   -- <C-+> needs a terminal with the kitty keyboard protocol; <C-=> and + are fallbacks
   for _, k in ipairs({ '<C-+>', '<C-=>', '+' }) do vim.keymap.set('n', k, M.new, o) end
   vim.keymap.set('n', '<C-d>', function() M.close_at(line()) end, o)
-  for _, k in ipairs({ '<Space>', 'q', '<Esc>' }) do
+  vim.keymap.set('n', '<C-q>', M.keys, o)
+  for _, k in ipairs({ '<C-b>', 'q', '<Esc>' }) do
     vim.keymap.set('n', k, function() close_side(); focus_term() end, o)
   end
   for _, k in ipairs({ '<C-/>', '<C-_>' }) do vim.keymap.set('n', k, M.hide, o) end
@@ -174,9 +366,9 @@ end
 function M.sidebar()
   if not valid(S.win) then return end
   if valid(S.side) then return api.nvim_set_current_win(S.side) end
-  local _, h, row, col = geom()
-  S.side = api.nvim_open_win(side_buf(), true, { relative = 'editor', width = SIDE, height = h,
-    row = row, col = col, border = 'rounded', title = ' Terminales ', title_pos = 'center', style = 'minimal' })
+  local cfg = side_cfg()
+  cfg.style = 'minimal'
+  S.side = api.nvim_open_win(side_buf(), true, cfg)
   vim.wo[S.side].cursorline = true
   relayout()
   render()
@@ -184,9 +376,11 @@ function M.sidebar()
 end
 
 function M.hide()
-  if valid(S.side) then api.nvim_win_close(S.side, true) end
-  if valid(S.win) then api.nvim_win_close(S.win, true) end
-  S.side, S.win = nil, nil
+  close(S.keys)
+  close(S.side)
+  close(S.win)
+  close(S.head)
+  S.keys, S.side, S.win, S.head = nil, nil, nil, nil
 end
 
 function M.toggle()
@@ -196,18 +390,37 @@ function M.toggle()
   vim.cmd.startinsert()
 end
 
-function M.setup()
+-- opts.position: 'float' (default), 'bottom', 'left' or 'right'; opts.size: fraction of the editor when docked.
+function M.setup(opts)
+  opts = opts or {}
+  if opts.position and not POSITIONS[opts.position] then
+    vim.notify(("Nterm: unknown position '%s', using 'float'"):format(opts.position), vim.log.levels.WARN)
+    opts.position = 'float'
+  end
+  C = vim.tbl_extend('force', C, opts)
   set_hl()
   local g = api.nvim_create_augroup('Nterm', { clear = true })
   api.nvim_create_autocmd('ColorScheme', { group = g, callback = set_hl })
   api.nvim_create_autocmd('VimResized', { group = g, callback = relayout })
+  api.nvim_create_autocmd('ModeChanged', { group = g, callback = function()
+    vim.schedule(function()
+      draw_head()
+      if valid(S.win) and not floating() then vim.cmd.redrawstatus({ bang = true }) end
+    end)
+  end })
+  -- Watches Enter without mapping it, so the key always reaches the shell untouched.
+  vim.on_key(function(key)
+    if key == '\r' and api.nvim_get_mode().mode == 't' and idx(api.nvim_get_current_buf()) then
+      record(api.nvim_get_current_buf())
+    end
+  end, ns)
   for _, k in ipairs({ '<C-/>', '<C-_>' }) do vim.keymap.set({ 'n', 't' }, k, M.toggle, { desc = 'Nterm' }) end
   api.nvim_create_user_command('NtermHelp', function()
     -- local installs (dir = ..., symlinks) don't get helptags generated for them
     local doc = vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':h:h:h') .. '/doc'
     pcall(vim.cmd.helptags, doc)
     vim.cmd.help('nterm')
-  end, { desc = 'Nterm: abrir la guía' })
+  end, { desc = 'Nterm: open the guide' })
 end
 
 return M
