@@ -6,7 +6,13 @@ local HEAD = 4 -- header rows: border + title + guide + border
 local ICON = '\u{f36f}' -- nf-linux-neovim, needs a Nerd Font
 local TICON = '\u{e795}' -- nf-dev-terminal
 local POSITIONS = { float = true, bottom = true, left = true, right = true }
-local C = { position = 'float', size = 0.3 } -- size: fraction of the editor for docked positions
+local C = {
+  position = 'float', -- 'float', 'bottom', 'left' or 'right'
+  size = 0.3,         -- docked positions: fraction of the editor
+  theme = 'auto',     -- 'auto': colors from the colorscheme, 'nterm': built-in palette
+  opacity = 1,        -- floating windows, 0..1 (winblend)
+  transparent = false, -- no background, so the terminal emulator's own transparency shows
+}
 local S = { terms = {}, cmds = {}, cur = nil, win = nil, side = nil, head = nil, sidebuf = nil, keys = nil }
 local ns = api.nvim_create_namespace('nterm')
 
@@ -33,7 +39,7 @@ local function idx(buf)
 end
 
 local BLUE = { '#2547a8', '#a8cdff' } -- title gradient, dark to light
-local TAB_BG = '#1b2440' -- background of the title tab in docked positions
+local TAB_BG = '#1b2440' -- background of the title tab in docked positions (recomputed by set_hl)
 local GUIDE = 'Ctrl-/ hide · Ctrl-+ new · Ctrl-< Ctrl-> switch · Ctrl-b sidebar · Ctrl-q keymaps · Esc Esc normal mode'
 local MODES = { -- first char of nvim_get_mode().mode -> label, gradient
   n = { 'NORMAL', '#2f63d6', '#8fb8ff' },
@@ -47,19 +53,65 @@ local MODES = { -- first char of nvim_get_mode().mode -> label, gradient
   t = { 'TERMINAL', '#b0127a', '#ff8ad8' },
 }
 
+-- theme = 'auto': each gradient is built from the fg of one of the colorscheme's groups
+local AUTO = { title = 'Function', n = 'Function', i = 'String', v = 'Type', V = 'Type', ['\22'] = 'Type',
+  s = 'Type', R = 'DiagnosticError', c = 'Number', t = 'Keyword' }
+local BUILTIN = vim.deepcopy({ title = BLUE, modes = MODES, tab = TAB_BG })
+
 local function mode() return MODES[api.nvim_get_mode().mode:sub(1, 1)] or MODES.n end
 local function term_label() return string.format('%s %d/%d', TICON, idx(S.cur) or 0, #S.terms) end
-
-local function set_hl()
-  api.nvim_set_hl(0, 'NtermIcon', { fg = '#3b82f6', bold = true })
-  api.nvim_set_hl(0, 'NtermTab', { bg = TAB_BG })
-  api.nvim_set_hl(0, 'NtermTabIcon', { fg = '#3b82f6', bg = TAB_BG, bold = true })
-end
 
 local function lerp(a, b, t)
   local function ch(h, i) return tonumber(h:sub(i, i + 1), 16) end
   return string.format('#%02x%02x%02x', ch(a, 2) + (ch(b, 2) - ch(a, 2)) * t + 0.5,
     ch(a, 4) + (ch(b, 4) - ch(a, 4)) * t + 0.5, ch(a, 6) + (ch(b, 6) - ch(a, 6)) * t + 0.5)
+end
+
+local function hl_color(name, key)
+  local c = api.nvim_get_hl(0, { name = name, link = false })[key]
+  return c and string.format('#%06x', c)
+end
+
+-- Fills BLUE, MODES and TAB_BG from the colorscheme (theme = 'auto') or the built-in palette.
+local function load_palette()
+  local function set(dst, a, b) dst[1], dst[2] = a, b end
+  set(BLUE, BUILTIN.title[1], BUILTIN.title[2])
+  for k, m in pairs(BUILTIN.modes) do MODES[k][2], MODES[k][3] = m[2], m[3] end
+  TAB_BG = BUILTIN.tab
+  if C.theme ~= 'auto' then return end
+  local bg = hl_color('Normal', 'bg') or '#000000'
+  -- darker end blends toward the background, lighter end toward white
+  local function ends(group)
+    local c = hl_color(group, 'fg')
+    if c then return lerp(c, bg, 0.35), lerp(c, '#ffffff', 0.3) end
+  end
+  local a, b = ends(AUTO.title)
+  if a then set(BLUE, a, b); TAB_BG = lerp(bg, a, 0.25) end
+  for k, group in pairs(AUTO) do
+    if MODES[k] then
+      a, b = ends(group)
+      if a then MODES[k][2], MODES[k][3] = a, b end
+    end
+  end
+end
+
+local function set_hl()
+  load_palette()
+  api.nvim_set_hl(0, 'NtermIcon', { fg = BLUE[1], bold = true })
+  api.nvim_set_hl(0, 'NtermTab', { bg = TAB_BG })
+  api.nvim_set_hl(0, 'NtermTabIcon', { fg = BLUE[1], bg = TAB_BG, bold = true })
+  api.nvim_set_hl(0, 'NtermNormal', { fg = hl_color('Normal', 'fg'), bg = 'NONE' })
+  api.nvim_set_hl(0, 'NtermBorder', { fg = hl_color('FloatBorder', 'fg') or hl_color('Normal', 'fg'), bg = 'NONE' })
+end
+
+-- Applies opacity / transparency to one of Nterm's windows.
+local function style_win(w)
+  if C.transparent then
+    vim.wo[w].winhighlight = 'Normal:NtermNormal,NormalFloat:NtermNormal,FloatBorder:NtermBorder,NormalNC:NtermNormal'
+  end
+  if api.nvim_win_get_config(w).relative ~= '' then
+    vim.wo[w].winblend = math.floor((1 - math.min(math.max(C.opacity, 0), 1)) * 100 + 0.5)
+  end
 end
 
 -- Calls fn(char, group) for each character of `text`, colored along the gradient a -> b.
@@ -257,6 +309,7 @@ function M.keys()
   S.keys = api.nvim_open_win(buf, true, { relative = 'editor', width = width, height = #lines,
     row = math.floor((vim.o.lines - #lines) / 2), col = math.floor((vim.o.columns - width) / 2),
     border = 'rounded', title = ' Nterm keymaps ', title_pos = 'center', style = 'minimal', zindex = 60 })
+  style_win(S.keys)
   local function back()
     close(S.keys)
     S.keys = nil
@@ -290,15 +343,18 @@ local function open_win(buf)
     cfg.style, cfg.focusable = 'minimal', false
     S.head = api.nvim_open_win(api.nvim_create_buf(false, true), false, cfg)
     vim.bo[api.nvim_win_get_buf(S.head)].bufhidden = 'wipe'
+    style_win(S.head)
     draw_head()
     cfg = main_cfg()
     cfg.style = 'minimal'
     S.win = api.nvim_open_win(buf, true, cfg)
+    style_win(S.win)
   else
     local vert = C.position ~= 'bottom'
     local size = math.floor((vert and vim.o.columns or vim.o.lines) * C.size)
     S.win = api.nvim_open_win(buf, true, { split = vert and C.position or 'below', win = -1,
       width = vert and size or nil, height = (not vert) and size or nil })
+    style_win(S.win)
     show(buf)
   end
   api.nvim_create_autocmd('WinClosed', { pattern = tostring(S.win), once = true,
@@ -370,6 +426,7 @@ function M.sidebar()
   cfg.style = 'minimal'
   S.side = api.nvim_open_win(side_buf(), true, cfg)
   vim.wo[S.side].cursorline = true
+  style_win(S.side)
   relayout()
   render()
   api.nvim_win_set_cursor(S.side, { math.max(idx(S.cur) or 1, 1), 0 })
@@ -390,7 +447,7 @@ function M.toggle()
   vim.cmd.startinsert()
 end
 
--- opts.position: 'float' (default), 'bottom', 'left' or 'right'; opts.size: fraction of the editor when docked.
+-- See C above for the options and their defaults.
 function M.setup(opts)
   opts = opts or {}
   if opts.position and not POSITIONS[opts.position] then

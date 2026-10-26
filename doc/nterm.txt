@@ -58,8 +58,11 @@ In the sidebar ~
 Nterm works without calling setup(). To change the defaults: >lua
 
     require('nterm').setup({
-      position = 'float', -- 'float', 'bottom', 'left' or 'right'
-      size = 0.3,         -- docked positions: fraction of the editor
+      position = 'float',  -- 'float', 'bottom', 'left' or 'right'
+      size = 0.3,          -- docked positions: fraction of the editor
+      theme = 'auto',      -- 'auto': colors from your colorscheme, 'nterm': built-in palette
+      opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
+      transparent = false, -- no background: your terminal emulator's transparency shows
     })
 <
 With lazy.nvim: >lua
@@ -70,6 +73,23 @@ With 'bottom', 'left' or 'right' the terminal is a split docked to that side
 of the editor. The header and the guide are replaced by a single tab on top
 of the split with the title, the current terminal and the mode, and the
 sidebar opens as a floating window.
+
+Colors ~
+With theme = 'auto' (the default) every gradient is built from a highlight
+group of your colorscheme, and follows it when you change colorscheme:
+
+    title, NORMAL   Function        VISUAL    Type
+    INSERT          String          COMMAND   Number
+    TERMINAL        Keyword         REPLACE   DiagnosticError
+
+Groups without a foreground color fall back to the built-in palette, which
+you can also force with theme = 'nterm'.
+
+Opacity and transparency ~
+`opacity` makes the floating windows see-through (Neovim blends them with
+what is behind, needs 'termguicolors'); it doesn't apply to docked splits.
+`transparent` removes Nterm's background instead, so the transparency of
+your terminal emulator (e.g. Alacritty's `window.opacity`) shows through.
 
 ==============================================================================
 5. NOTES                                                        *nterm-notes*

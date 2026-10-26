@@ -65,8 +65,11 @@ Nterm works without calling `setup()`. To change the defaults:
 
 ```lua
 require('nterm').setup({
-  position = 'float', -- 'float', 'bottom', 'left' or 'right'
-  size = 0.3,         -- docked positions: fraction of the editor
+  position = 'float',  -- 'float', 'bottom', 'left' or 'right'
+  size = 0.3,          -- docked positions: fraction of the editor
+  theme = 'auto',      -- 'auto': colors from your colorscheme, 'nterm': built-in palette
+  opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
+  transparent = false, -- no background: your terminal emulator's transparency shows
 })
 ```
 
@@ -77,6 +80,10 @@ With lazy.nvim:
 ```
 
 With `bottom`, `left` or `right` the terminal is a split docked to that side of the editor. The header and the guide are replaced by a single tab with the title, the current terminal and the mode, and the sidebar opens as a floating window.
+
+**Colors.** With `theme = 'auto'` (the default) the gradients are built from your colorscheme's highlight groups (`Function` for the title and NORMAL, `String` for INSERT, `Type` for VISUAL, `Keyword` for TERMINAL, `Number` for COMMAND, `DiagnosticError` for REPLACE) and follow it when you switch colorscheme. `theme = 'nterm'` uses the built-in blue palette.
+
+**Opacity and transparency.** `opacity` makes the floating windows see-through (Neovim's `winblend`; it doesn't apply to docked splits). `transparent = true` removes Nterm's background instead, so your terminal emulator's own transparency (e.g. Alacritty's `window.opacity`) shows through.
 
 ## Usage
 
@@ -117,6 +124,7 @@ or the standard `:help nterm`.
 # headless tests
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/smoke.lua
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/docked.lua
+nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/theme.lua
 
 # regenerate the screenshots in a new Alacritty window (macOS; the terminal
 # running it needs Screen Recording permission)
