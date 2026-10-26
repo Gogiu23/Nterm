@@ -12,12 +12,14 @@ local C = {
   theme = 'auto',     -- 'auto': colors from the colorscheme, 'nterm': built-in palette
   opacity = 1,        -- floating windows, 0..1 (winblend)
   transparent = false, -- no background, so the terminal emulator's own transparency shows
+  lazygit_key = '<leader>gg', -- false to disable
 }
-local S = { terms = {}, cmds = {}, cur = nil, win = nil, side = nil, head = nil, sidebuf = nil, keys = nil }
+local S = { terms = {}, cmds = {}, apps = {}, cur = nil, win = nil, side = nil, head = nil, sidebuf = nil, keys = nil }
 local ns = api.nvim_create_namespace('nterm')
 
 local KEYS = {
   { 'Global', 'Ctrl-/', 'Show / hide Nterm' },
+  { 'Global', '<leader>gg', 'Open lazygit' },
   { 'Terminal', 'Ctrl-b', 'Open the sidebar' },
   { 'Terminal', 'Ctrl-+', 'New terminal (also Ctrl-=)' },
   { 'Terminal', 'Ctrl-> / Ctrl-<', 'Next / previous terminal (also Ctrl-. / Ctrl-,)' },
@@ -28,6 +30,7 @@ local KEYS = {
   { 'Sidebar', 'Ctrl-d', 'Close terminal (asks first)' },
   { 'Sidebar', 'Ctrl-b / q / Esc', 'Close the sidebar' },
   { 'Sidebar', 'Ctrl-q', 'Show this keymap list' },
+  { 'Command', ':Nterm [cmd]', 'Toggle Nterm, or run cmd in a new terminal' },
   { 'Command', ':NtermHelp', 'Open the full guide' },
 }
 
@@ -282,7 +285,7 @@ local function remove(buf)
   local i = idx(buf)
   if not i then return end
   table.remove(S.terms, i)
-  S.cmds[buf] = nil
+  S.cmds[buf], S.apps[buf] = nil, nil
   if #S.terms == 0 then
     S.cur = nil
     M.hide()
@@ -321,18 +324,22 @@ function M.keys()
   for _, k in ipairs({ 'q', '<Esc>', '<C-q>' }) do vim.keymap.set('n', k, back, { buffer = buf, nowait = true }) end
 end
 
-local function term_maps(buf)
+-- `app`: the terminal runs a program (e.g. lazygit) instead of a shell, so only the keys needed to
+-- leave it are taken; Esc, Ctrl-b, Ctrl-q... reach the program untouched.
+local function term_maps(buf, app)
   local o = { buffer = buf, nowait = true }
   for _, k in ipairs({ '<C-/>', '<C-_>' }) do vim.keymap.set({ 'n', 't' }, k, M.hide, o) end
-  vim.keymap.set({ 'n', 't' }, '<C-b>', M.sidebar, o)
-  vim.keymap.set({ 'n', 't' }, '<C-q>', M.keys, o)
-  for _, k in ipairs({ '<C-+>', '<C-=>' }) do vim.keymap.set({ 'n', 't' }, k, M.new, o) end
   -- Ctrl-> / Ctrl-< arrive in different shapes depending on layout and keyboard protocol
   for _, k in ipairs({ '<C->>', '<C-S->>', '<C-S-lt>', '<C-.>' }) do
     vim.keymap.set({ 'n', 't' }, k, function() M.cycle(1) end, o)
   end
   for _, k in ipairs({ '<C-lt>', '<C-,>' }) do vim.keymap.set({ 'n', 't' }, k, function() M.cycle(-1) end, o) end
-  vim.keymap.set('t', '<Esc><Esc>', [[<C-\><C-n>]], { buffer = buf })
+  if not app then
+    vim.keymap.set({ 'n', 't' }, '<C-b>', M.sidebar, o)
+    vim.keymap.set({ 'n', 't' }, '<C-q>', M.keys, o)
+    for _, k in ipairs({ '<C-+>', '<C-=>' }) do vim.keymap.set({ 'n', 't' }, k, M.new, o) end
+    vim.keymap.set('t', '<Esc><Esc>', [[<C-\><C-n>]], { buffer = buf })
+  end
   api.nvim_create_autocmd('TermClose', { buffer = buf, once = true,
     callback = function() vim.schedule(function() remove(buf) end) end })
 end
@@ -361,20 +368,52 @@ local function open_win(buf)
     callback = function() vim.schedule(function() close(S.head); close_side() end) end })
 end
 
-function M.new()
+local function open_term(cmd, cwd)
   local buf = api.nvim_create_buf(false, true)
   table.insert(S.terms, buf)
   S.cur = buf
+  if cmd then S.cmds[buf], S.apps[buf] = cmd, true end
   if valid(S.win) then
     show(buf)
     api.nvim_set_current_win(S.win)
   else
     open_win(buf)
   end
-  vim.fn.jobstart(vim.o.shell, { term = true })
-  term_maps(buf)
+  vim.fn.jobstart(cmd or vim.o.shell, { term = true, cwd = cwd })
+  term_maps(buf, cmd ~= nil)
   close_side()
   vim.cmd.startinsert()
+  return buf
+end
+
+function M.new() open_term() end
+
+-- Runs `cmd` in a new terminal; it closes when the program exits.
+function M.run(cmd, cwd) return open_term(cmd, cwd) end
+
+-- Opens lazygit at the git root of the current file, reusing a running one.
+function M.lazygit()
+  if vim.fn.executable('lazygit') == 0 then
+    return vim.notify('Nterm: lazygit not found in PATH', vim.log.levels.ERROR)
+  end
+  for i, b in ipairs(S.terms) do
+    if S.apps[b] and S.cmds[b] == 'lazygit' then
+      if not valid(S.win) then S.cur = b; open_win(b) end
+      return M.select(i)
+    end
+  end
+  M.run('lazygit', vim.fs.root(0, '.git') or vim.fn.getcwd())
+end
+
+-- Called by lazygit (see the README) to open a file in this Neovim: hides Nterm, keeping lazygit
+-- running in the background, so Ctrl-/ brings it back where it was.
+function M.edit(file, line)
+  -- lazygit passes {{filename}} double-quoted, with \ " $ ` escaped
+  local quoted = file:match('^"(.*)"$')
+  if quoted then file = quoted:gsub('\\([\\"$`])', '%1') end
+  M.hide()
+  vim.cmd.edit(vim.fn.fnameescape(file))
+  if line then pcall(api.nvim_win_set_cursor, 0, { tonumber(line), 0 }) end
 end
 
 function M.select(i)
@@ -467,11 +506,21 @@ function M.setup(opts)
   end })
   -- Watches Enter without mapping it, so the key always reaches the shell untouched.
   vim.on_key(function(key)
-    if key == '\r' and api.nvim_get_mode().mode == 't' and idx(api.nvim_get_current_buf()) then
-      record(api.nvim_get_current_buf())
+    local buf = api.nvim_get_current_buf()
+    if key == '\r' and api.nvim_get_mode().mode == 't' and idx(buf) and not S.apps[buf] then
+      record(buf)
     end
   end, ns)
   for _, k in ipairs({ '<C-/>', '<C-_>' }) do vim.keymap.set({ 'n', 't' }, k, M.toggle, { desc = 'Nterm' }) end
+  -- setup() can run twice (plugin/ and the user's opts): drop the old lazygit key first
+  if S.lazygit_key then pcall(vim.keymap.del, 'n', S.lazygit_key) end
+  S.lazygit_key = C.lazygit_key or nil
+  if S.lazygit_key then vim.keymap.set('n', S.lazygit_key, M.lazygit, { desc = 'Nterm: lazygit' }) end
+  api.nvim_create_user_command('Nterm', function(a)
+    if a.args == '' then M.toggle()
+    elseif a.args == 'lazygit' then M.lazygit()
+    else M.run(a.args) end
+  end, { nargs = '*', complete = 'shellcmd', desc = 'Nterm: toggle, or run a command in a new terminal' })
   api.nvim_create_user_command('NtermHelp', function()
     -- local installs (dir = ..., symlinks) don't get helptags generated for them
     local doc = vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':h:h:h') .. '/doc'

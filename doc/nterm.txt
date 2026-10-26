@@ -7,7 +7,8 @@ CONTENTS                                                        *nterm*
   2. Keymaps ................................. |nterm-keymaps|
   3. Commands ................................ |nterm-commands|
   4. Configuration ........................... |nterm-config|
-  5. Notes ................................... |nterm-notes|
+  5. Lazygit ................................. |nterm-lazygit|
+  6. Notes ................................... |nterm-notes|
 
 ==============================================================================
 1. INTRODUCTION                                                 *nterm-intro*
@@ -26,6 +27,7 @@ right, and a short guide of essential keymaps below.
 Anywhere ~
   <C-/>           Show or hide the floating terminal. Creates one if none
                   exists.
+  <leader>gg      Open lazygit (see |nterm-lazygit|).
 
 Inside the terminal ~
   <C-+>           Open a new terminal. Alternative: <C-=>.
@@ -49,6 +51,14 @@ In the sidebar ~
 ==============================================================================
 3. COMMANDS                                                     *nterm-commands*
 
+                                                                *:Nterm*
+:Nterm            Show or hide Nterm.
+:Nterm lazygit    Open lazygit (see |nterm-lazygit|).
+:Nterm {cmd}      Run {cmd} in a new terminal, e.g. `:Nterm btop`. Only
+                  <C-/>, <C->> and <C-<> are taken by Nterm there, every
+                  other key reaches the program. The terminal closes when
+                  the program exits.
+
                                                                 *:NtermHelp*
 :NtermHelp        Open this guide.
 
@@ -63,6 +73,7 @@ Nterm works without calling setup(). To change the defaults: >lua
       theme = 'auto',      -- 'auto': colors from your colorscheme, 'nterm': built-in palette
       opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
       transparent = false, -- no background: your terminal emulator's transparency shows
+      lazygit_key = '<leader>gg', -- false to disable
     })
 <
 With lazy.nvim: >lua
@@ -92,7 +103,33 @@ what is behind, needs 'termguicolors'); it doesn't apply to docked splits.
 your terminal emulator (e.g. Alacritty's `window.opacity`) shows through.
 
 ==============================================================================
-5. NOTES                                                        *nterm-notes*
+5. LAZYGIT                                                      *nterm-lazygit*
+
+<leader>gg (or `:Nterm lazygit`) opens lazygit in a Nterm terminal, at the
+git root of the current file. If lazygit is already running, Nterm switches
+to it. Esc, <C-b>, <C-d>... go to lazygit; <C-/> hides it and <C-<> / <C->>
+switch terminals. Quitting lazygit (q) closes its terminal.
+
+To open files from lazygit (e) in this Neovim instead of a nested one, add
+this to lazygit's config.yml (`lazygit --print-config-dir`): >yaml
+
+    os:
+      editPreset: nvim-remote
+      edit: >-
+        [ -z "$NVIM" ] && (nvim -- {{filename}}) ||
+        nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{filename}}]])<CR>'
+      editAtLine: >-
+        [ -z "$NVIM" ] && (nvim +{{line}} -- {{filename}}) ||
+        nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{filename}}]], {{line}})<CR>'
+      openDirInEditor: >-
+        [ -z "$NVIM" ] && (nvim -- {{dir}}) ||
+        nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{dir}}]])<CR>'
+<
+Editing a file hides Nterm and keeps lazygit running: <C-/> brings it back
+where you left it. Outside Neovim the commands fall back to plain nvim.
+
+==============================================================================
+6. NOTES                                                        *nterm-notes*
 
 - <C-+> only reaches Neovim in terminals that support the kitty keyboard
   protocol (Kitty, WezTerm, Ghostty, Alacritty). Elsewhere use <C-=> or +.

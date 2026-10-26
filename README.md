@@ -11,6 +11,7 @@ Floating terminal for Neovim, with a sidebar to switch between several terminals
 - Create terminals and switch between them without opening the sidebar.
 - Header with the current terminal (e.g. `2/3`), a gradient title, the current mode (NORMAL, INSERT, VISUAL, TERMINAL…) in its own gradient, and a guide of essential keymaps.
 - Floating by default, or docked to the bottom, left or right of the editor.
+- [Lazygit](https://github.com/jesseduffield/lazygit) integration (`<leader>gg`), and `:Nterm <cmd>` to run any program in a terminal.
 - `Ctrl-q` popup with every keymap, and a full guide in `:help nterm`.
 
 ## Screenshots
@@ -70,6 +71,7 @@ require('nterm').setup({
   theme = 'auto',      -- 'auto': colors from your colorscheme, 'nterm': built-in palette
   opacity = 1,         -- floating windows, 0..1 (uses 'winblend')
   transparent = false, -- no background: your terminal emulator's transparency shows
+  lazygit_key = '<leader>gg', -- false to disable
 })
 ```
 
@@ -90,6 +92,7 @@ With `bottom`, `left` or `right` the terminal is a split docked to that side of 
 | Where | Key | Action |
 |---|---|---|
 | Anywhere | `Ctrl-/` | Show or hide the terminal (creates one if none exists) |
+| Anywhere | `<leader>gg` | Open lazygit |
 | Terminal | `Ctrl-+` | Open a new terminal |
 | Terminal | `Ctrl->` / `Ctrl-<` | Next / previous terminal (wraps around) |
 | Terminal | `Ctrl-b` | Open the sidebar |
@@ -100,6 +103,30 @@ With `bottom`, `left` or `right` the terminal is a split docked to that side of 
 | Sidebar | `Ctrl-d` | Close the selected terminal (asks first) |
 | Sidebar | `Ctrl-b` / `q` / `Esc` | Close the sidebar and go back to the terminal |
 | Sidebar | `Ctrl-q` | Show every keymap |
+
+## Lazygit
+
+`<leader>gg` (or `:Nterm lazygit`) opens lazygit in a Nterm terminal at the git root of the current file, or switches to it if it's already running. Every key except `Ctrl-/` (hide) and `Ctrl-<` / `Ctrl->` (switch terminals) goes to lazygit, so `Esc`, `Ctrl-b`, `Ctrl-d`… work as usual. Quitting lazygit closes its terminal.
+
+To open files from lazygit (`e`) in this Neovim instead of a nested one, add this to lazygit's `config.yml` (find it with `lazygit --print-config-dir`):
+
+```yaml
+os:
+  editPreset: nvim-remote
+  edit: >-
+    [ -z "$NVIM" ] && (nvim -- {{filename}}) ||
+    nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{filename}}]])<CR>'
+  editAtLine: >-
+    [ -z "$NVIM" ] && (nvim +{{line}} -- {{filename}}) ||
+    nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{filename}}]], {{line}})<CR>'
+  openDirInEditor: >-
+    [ -z "$NVIM" ] && (nvim -- {{dir}}) ||
+    nvim --server "$NVIM" --remote-send '<C-\><C-n><Cmd>lua require("nterm").edit([[{{dir}}]])<CR>'
+```
+
+Editing a file hides Nterm and keeps lazygit running, so `Ctrl-/` brings it back where you left it. Outside Neovim the commands fall back to plain `nvim`.
+
+`:Nterm <cmd>` works the same way for any other program, e.g. `:Nterm btop`.
 
 ## Guide
 
@@ -125,6 +152,7 @@ or the standard `:help nterm`.
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/smoke.lua
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/docked.lua
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/theme.lua
+nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/lazygit.lua
 
 # regenerate the screenshots in a new Alacritty window (macOS; the terminal
 # running it needs Screen Recording permission)
