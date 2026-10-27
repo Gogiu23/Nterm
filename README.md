@@ -1,6 +1,8 @@
-# Nterm
+<p align="center">
+  <img src="assets/logo.png" alt="Nterm" width="300">
+</p>
 
-Floating terminal for Neovim, with a sidebar to switch between several terminals.
+<p align="center">Floating terminal for Neovim, with a sidebar to switch between several terminals.</p>
 
 ![Nterm demo](assets/demo.gif)
 
