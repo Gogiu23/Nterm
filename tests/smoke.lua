@@ -9,6 +9,7 @@ assert(n._parse('bash-5.2$ echo hi') == 'echo hi')
 
 n.toggle()
 n.new()
+assert(vim.wo.wrap, "terminal window must wrap, or wider output scrolls sideways")
 n.sidebar()
 local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(#lines == 2, 'expected 2 terminals, got ' .. #lines)

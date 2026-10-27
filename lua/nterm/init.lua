@@ -280,6 +280,9 @@ end
 -- Shows `buf` in the terminal window; docked windows need their options set on every buffer switch.
 local function show(buf)
   api.nvim_win_set_buf(S.win, buf)
+  -- Neovim's TermOpen sets 'nowrap': output printed while the window was wider (before the
+  -- sidebar shrank it, or a VimResized) would then scroll sideways
+  vim.wo[S.win].wrap = true
   if floating() then return end
   local wo = vim.wo[S.win]
   wo.winbar = "%{%v:lua.require'nterm'.winbar()%}"
@@ -377,6 +380,7 @@ local function open_win(buf)
     cfg.style = 'minimal'
     S.win = api.nvim_open_win(buf, true, cfg)
     style_win(S.win)
+    vim.wo[S.win].wrap = true
   else
     local vert = C.position ~= 'bottom'
     local size = math.floor((vert and vim.o.columns or vim.o.lines) * C.size)
@@ -401,6 +405,7 @@ local function open_term(cmd, cwd)
     open_win(buf)
   end
   vim.fn.jobstart(cmd or vim.o.shell, { term = true, cwd = cwd })
+  vim.wo[S.win].wrap = true -- TermOpen just set 'nowrap', see show()
   term_maps(buf, cmd ~= nil)
   close_side()
   vim.cmd.startinsert()
