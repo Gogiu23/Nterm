@@ -2,7 +2,7 @@
 
 Floating terminal for Neovim, with a sidebar to switch between several terminals.
 
-![Terminal](assets/terminal.png)
+![Nterm demo](assets/demo.gif)
 
 ## Features
 
@@ -15,6 +15,8 @@ Floating terminal for Neovim, with a sidebar to switch between several terminals
 - `Ctrl-q` popup with every keymap, and a full guide in `:help nterm`.
 
 ## Screenshots
+
+![Terminal](assets/terminal.png)
 
 | Sidebar | Keymaps (`Ctrl-q`) | Confirmation before closing |
 |---|---|---|
@@ -157,7 +159,7 @@ nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/docked.lua
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/theme.lua
 nvim --headless -u NONE --cmd 'set rtp+=.' -l tests/lazygit.lua
 
-# regenerate the screenshots in a new Alacritty window (macOS; the terminal
-# running it needs Screen Recording permission)
+# regenerate the screenshots and assets/demo.gif in a new Alacritty window
+# (macOS, needs ffmpeg; the terminal running it needs Screen Recording permission)
 assets/capture/run.sh
 ```

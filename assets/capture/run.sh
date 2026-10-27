@@ -9,4 +9,11 @@ shoot() {
   -e nvim -c "luafile assets/capture/demo.lua"
 }
 shoot                         # floating layout
-NTERM_POSITION=bottom shoot   # docked layout
+(NTERM_POSITION=bottom shoot) # docked layout (subshell: sh keeps the variable after a function call)
+# Animated tour: frames are grabbed while it runs, then turned into a GIF
+FRAMES="$(mktemp -d)"
+NTERM_FRAMES="$FRAMES" shoot
+ffmpeg -y -loglevel error -f concat -safe 0 -i "$FRAMES/list.txt" \
+  -vf "fps=10,scale=900:-1:flags=lanczos,mpdecimate,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=none" \
+  -fps_mode vfr assets/demo.gif # mpdecimate drops repeated frames: ~1.5 MB instead of ~9 MB
+rm -rf "$FRAMES"
